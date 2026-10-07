@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Libreria</title>
+  <style>
+    body { font-family: sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    td, th { border: 1px solid #ccc; padding: 6px; text-align: left; }
+    form input { display: block; margin: 6px 0; padding: 6px; }
+    #msg { color: #b00; font-weight: bold; }
+    img { height: 50px; }
+  </style>
+</head>
+<body>
+  <h1>Libreria</h1>
+  <p id="msg"></p>
+
+  <form id="f">
+    <input type="hidden" id="id">
+    <input id="title" placeholder="Titolo" required>
+    <input id="pages" type="number" placeholder="Pagine" required>
+    <input id="price" type="number" step="0.01" placeholder="Prezzo" required>
+    <label><input id="available" type="checkbox" checked style="display:inline"> Disponibile</label>
+    <input id="date" type="date">
+    <input id="cover" type="file" accept="image/*">
+    <button type="submit">Salva</button>
+    <button type="button" id="cancel">Annulla</button>
+  </form>
+
+  <table>
+    <thead><tr><th>ID</th><th>Copertina</th><th>Titolo</th><th>Pagine</th><th>Prezzo</th><th>Disp.</th><th>Data</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+<script>
+let books = [];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function load() {
+  const r = await fetch('/api/books');
+  books = await r.json();
+  $('rows').innerHTML = books.map(b => `
+    <tr>
+      <td>${b.id}</td>
+      <td>${b.cover_url ? `<img src="${esc(b.cover_url)}">` : ''}</td>
+      <td>${esc(b.title)}</td>
+      <td>${b.pages}</td>
+      <td>${b.price}</td>
+      <td>${b.available ? 'Sì' : 'No'}</td>
+      <td>${b.published_date ? b.published_date.slice(0, 10) : ''}</td>
+      <td><button onclick="edit(${b.id})">Modifica</button>
+          <button onclick="del(${b.id})">Elimina</button></td>
+    </tr>`).join('');
+}
+
+function resetForm() { $('f').reset(); $('id').value = ''; $('msg').textContent = ''; }
+$('cancel').onclick = resetForm;
+
+function edit(id) {
+  const b = books.find(x => x.id === id);
+  $('id').value = b.id; $('title').value = b.title; $('pages').value = b.pages;
+  $('price').value = b.price; $('available').checked = b.available;
+  $('date').value = b.published_date ? b.published_date.slice(0, 10) : '';
+}
+
+async function del(id) {
+  if (!confirm('Eliminare il libro?')) return;
+  await fetch('/api/books/' + id, { method: 'DELETE' });
+  load();
+}
+
+$('f').onsubmit = async e => {
+  e.preventDefault();
+  $('msg').textContent = '';
+  const id = $('id').value;
+  const body = {
+    title: $('title').value,
+    pages: parseInt($('pages').value, 10),
+    price: parseFloat($('price').value),
+    available: $('available').checked,
+    published_date: $('date').value || null
+  };
+  const r = await fetch(id ? '/api/books/' + id : '/api/books', {
+    method: id ? 'PUT' : 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await r.json();
+  if (!r.ok) { $('msg').textContent = data.error; return; }
+
+  const file = $('cover').files[0];
+  if (file) {
+    const fd = new FormData();
+    fd.append('cover', file);
+    const r2 = await fetch('/api/books/' + data.id + '/cover', { method: 'POST', body: fd });
+    if (!r2.ok) { $('msg').textContent = (await r2.json()).error; }
+  }
+  resetForm();
+  load();
+};
+
+load();
+</script>
+</body>
+</html>
