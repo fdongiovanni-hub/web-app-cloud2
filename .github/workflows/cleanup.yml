@@ -11,4 +11,4 @@
            run: |
              curl -f -X POST --max-time 180 \
                -H "x-job-token: ${{ secrets.JOB_TOKEN }}" \
-               "${{ secrets.APP_URL }}/api/jobs/cleanup?days=30"
+               "${{ secrets.APP_URL }}/api/jobs/cleanup?days=0"
