@@ -170,7 +170,9 @@ app.use((err, req, res, next) => {
 });
 
 // --- AVVIO ---
+// modified during migration RENDER -> ALWAYSDATA
+// (it requires both IP and PORT)
 const PORT = process.env.PORT || 3000;
 initDb().then(() => {
-  app.listen(PORT, () => console.log('Server attivo sulla porta ' + PORT));
+  app.listen(PORT, process.env.IP || '0.0.0.0', () => console.log('Server attivo sulla porta ' + PORT));
 }).catch(e => { console.error('Errore DB', e); process.exit(1); });
