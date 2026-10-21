@@ -2,11 +2,17 @@ require('dotenv').config();
 const express = require('express');
 const { Pool } = require('pg');
 const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
+//const cloudinary = require('cloudinary').v2;
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
 app.use(express.static('public')); // serve la pagina web dalla cartella public/
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 //DATABASE
 const pool = new Pool({
@@ -126,21 +132,64 @@ const upload = multer({
     file.mimetype.startsWith('image/') ? cb(null, true) : cb(new Error('Sono ammesse solo immagini'))
 });
 
+
 app.post('/api/books/:id/cover', upload.single('cover'), h(async (req, res) => {
-  const id = parseId(req, res); if (!id) return;
-  if (!req.file) return res.status(400).json({ error: 'nessun file ricevuto (campo "cover")' });
-  const result = await new Promise((resolve, reject) => {
-    cloudinary.uploader
-      .upload_stream({ folder: 'books' }, (err, r) => (err ? reject(err) : resolve(r)))
-      .end(req.file.buffer);
-  });
-  const r = await pool.query(
-    'UPDATE books SET cover_url=$1 WHERE id=$2 RETURNING *',
-    [result.secure_url, id]
+  const id = parseId(req, res);
+  if (!id) return;
+
+  if (!req.file) {
+    return res.status(400).json({
+      error: 'nessun file ricevuto (campo "cover")'
+    });
+  }
+
+  const book = await pool.query(
+    'SELECT id FROM books WHERE id = $1',
+    [id]
   );
-  if (r.rowCount === 0) return res.status(404).json({ error: 'libro non trovato' });
-  res.json(r.rows[0]);
+
+  if (book.rowCount === 0) {
+    return res.status(404).json({ error: 'libro non trovato' });
+  }
+
+  const extensions = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif'
+  };
+
+  const extension = extensions[req.file.mimetype];
+
+  if (!extension) {
+    return res.status(400).json({
+      error: 'Formato non supportato. Usa JPEG, PNG, WebP o GIF.'
+    });
+  }
+
+  const path = `books/${id}-${Date.now()}.${extension}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('book-covers')
+    .upload(path, req.file.buffer, {
+      contentType: req.file.mimetype,
+      upsert: false
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage
+    .from('book-covers')
+    .getPublicUrl(path);
+
+  const result = await pool.query(
+    'UPDATE books SET cover_url = $1 WHERE id = $2 RETURNING *',
+    [data.publicUrl, id]
+  );
+
+  res.json(result.rows[0]);
 }));
+
 
 // --- BACKGROUND JOB ---
 // Chiamato ogni giorno da GitHub Actions. Protetto da un token segreto.
@@ -169,8 +218,7 @@ app.use((err, req, res, next) => {
   res.status(clientError ? 400 : 500).json({ error: clientError ? err.message : 'errore interno del server' });
 });
 
-// --- AVVIO ---
-// modified during migration RENDER -> ALWAYSDATA
+// RENDER -> ALWAYSDATA
 // (it requires both IP and PORT)
 const PORT = process.env.PORT || 3000;
 initDb().then(() => {
